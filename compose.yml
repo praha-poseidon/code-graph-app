@@ -1,0 +1,103 @@
+name: codegraph
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        CODEGRAPH_ENGINE_REPOSITORY: ${CODEGRAPH_ENGINE_REPOSITORY:-https://github.com/praha-poseidon/code-graph-engine.git}
+        CODEGRAPH_ENGINE_REF: ${CODEGRAPH_ENGINE_REF:-master}
+        CODEGRAPH_TOOL_BUNDLE_URL: ${CODEGRAPH_TOOL_BUNDLE_URL:-}
+    image: codegraph/workbench:${CODEGRAPH_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      CODEGRAPH_DATABASE_URL: jdbc:mysql://mysql:3306/codegraph?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
+      CODEGRAPH_DATABASE_USERNAME: codegraph
+      CODEGRAPH_DATABASE_PASSWORD: ${MYSQL_CODEGRAPH_PASSWORD:?set MYSQL_CODEGRAPH_PASSWORD in .env}
+      CODEGRAPH_DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+      CODEGRAPH_STORAGE_TYPE: neo4j
+      SPRING_NEO4J_URI: bolt://neo4j:7687
+      SPRING_NEO4J_AUTHENTICATION_USERNAME: neo4j
+      SPRING_NEO4J_AUTHENTICATION_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      CODEGRAPH_QDRANT_URL: http://qdrant:6333
+      CODEGRAPH_MASTER_KEY: ${CODEGRAPH_MASTER_KEY:?set CODEGRAPH_MASTER_KEY in .env}
+      CODEGRAPH_AUTO_BUILD: ${CODEGRAPH_AUTO_BUILD:-true}
+      CODEGRAPH_PARSER_PROCESS_LANGUAGES: ${CODEGRAPH_PARSER_PROCESS_LANGUAGES:-}
+      CODEGRAPH_PARSER_JAVA_COMMAND: ${CODEGRAPH_PARSER_JAVA_COMMAND:-}
+      CODEGRAPH_PARSER_GO_COMMAND: ${CODEGRAPH_PARSER_GO_COMMAND:-}
+      CODEGRAPH_PARSER_GO_STREAMING: ${CODEGRAPH_PARSER_GO_STREAMING:-true}
+      CODEGRAPH_PARSER_JAVASCRIPT_COMMAND: ${CODEGRAPH_PARSER_JAVASCRIPT_COMMAND:-}
+      CODEGRAPH_PARSER_TYPESCRIPT_COMMAND: ${CODEGRAPH_PARSER_TYPESCRIPT_COMMAND:-}
+      CODEGRAPH_PARSER_PYTHON_COMMAND: ${CODEGRAPH_PARSER_PYTHON_COMMAND:-}
+      CODEGRAPH_PARSER_PHP_COMMAND: ${CODEGRAPH_PARSER_PHP_COMMAND:-}
+      CODEGRAPH_PARSER_KOTLIN_COMMAND: ${CODEGRAPH_PARSER_KOTLIN_COMMAND:-}
+      CODEGRAPH_PARSER_SWIFT_COMMAND: ${CODEGRAPH_PARSER_SWIFT_COMMAND:-}
+    ports:
+      - "${CODEGRAPH_PORT:-8084}:8084"
+    volumes:
+      - codegraph_workspaces:/var/lib/codegraph/workspaces
+      - ${CODEGRAPH_PARSER_HOME:-./parsers}:/opt/codegraph/parsers:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: codegraph
+      MYSQL_USER: codegraph
+      MYSQL_PASSWORD: ${MYSQL_CODEGRAPH_PASSWORD:?set MYSQL_CODEGRAPH_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    ports:
+      - "${MYSQL_PORT:-3306}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  neo4j:
+    image: neo4j:5-community
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 1G
+    ports:
+      - "${NEO4J_HTTP_PORT:-7474}:7474"
+      - "${NEO4J_BOLT_PORT:-7687}:7687"
+    volumes:
+      - neo4j_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/7687'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    restart: unless-stopped
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mysql_data:
+  neo4j_data:
+  qdrant_data:
+  codegraph_workspaces:
