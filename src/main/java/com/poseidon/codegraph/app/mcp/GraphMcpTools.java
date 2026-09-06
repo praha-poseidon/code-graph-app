@@ -2,6 +2,8 @@ package com.poseidon.codegraph.app.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.poseidon.codegraph.app.config.RepositoryConfigStore;
+import com.poseidon.codegraph.app.source.CodeSourceSnapshot;
+import com.poseidon.codegraph.app.source.CodeSourceSnapshotStore;
 import com.poseidon.codegraph.engine.application.model.CodeRelationshipDO;
 import com.poseidon.codegraph.engine.application.repository.*;
 import io.modelcontextprotocol.server.McpStatelessServerFeatures.SyncToolSpecification;
@@ -15,17 +17,21 @@ import java.util.function.Function;
 @Component
 public class GraphMcpTools {
     private final RepositoryConfigStore projects;
+    private final CodePackageRepository packages;
     private final CodeFunctionRepository functions;
     private final CodeUnitRepository units;
     private final CodeEndpointRepository endpoints;
     private final CodeRelationshipRepository relationships;
+    private final CodeSourceSnapshotStore sources;
     private final ObjectMapper mapper;
 
-    public GraphMcpTools(RepositoryConfigStore projects, CodeFunctionRepository functions,
+    public GraphMcpTools(RepositoryConfigStore projects, CodePackageRepository packages,
+            CodeFunctionRepository functions,
             CodeUnitRepository units, CodeEndpointRepository endpoints,
-            CodeRelationshipRepository relationships, ObjectMapper mapper) {
-        this.projects = projects; this.functions = functions; this.units = units;
+            CodeRelationshipRepository relationships, CodeSourceSnapshotStore sources, ObjectMapper mapper) {
+        this.projects = projects; this.packages = packages; this.functions = functions; this.units = units;
         this.endpoints = endpoints; this.relationships = relationships; this.mapper = mapper;
+        this.sources = sources;
     }
 
     public List<SyncToolSpecification> tools() {
@@ -37,6 +43,11 @@ public class GraphMcpTools {
                         "projectId", identity.projectId(), "branch", project.gitBranch(),
                         "graphScope", identity.graphScope());
                 }).toList())),
+            tool("search_nodes", "Search persisted graph nodes by name, qualified name, id or source path. Read-only.",
+                Map.of("repositoryId", integer(), "query", string(),
+                    "nodeType", Map.of("type", "string", "enum", List.of("PACKAGE", "UNIT", "FUNCTION", "ENDPOINT")),
+                    "limit", Map.of("type", "integer", "minimum", 1, "maximum", 50)),
+                List.of("repositoryId", "query"), this::searchNodes),
             tool("get_file_nodes", "Read persisted functions, types and endpoints for a repository-relative source file. Does not parse or build.",
                 Map.of("repositoryId", integer(), "path", string()), List.of("repositoryId", "path"), args -> {
                     String scope = scope(args);
@@ -50,11 +61,76 @@ public class GraphMcpTools {
                     return Map.of("graphScope", scope, "nodes", nodes.stream().limit(500).toList(),
                         "truncated", nodes.size() > 500);
                 }),
+            tool("get_node_source", "Read the source range belonging to one persisted graph node from the promoted source snapshot. Read-only.",
+                Map.of("repositoryId", integer(), "nodeId", string(),
+                    "contextLines", Map.of("type", "integer", "minimum", 0, "maximum", 100)),
+                List.of("repositoryId", "nodeId"), this::nodeSource),
             tool("trace_relationships", "Read native stored relationships around a node, within the selected repository branch. No inferred/renamed edges. Bounded traversal; truncated=true means incomplete.",
                 Map.of("repositoryId", integer(), "nodeId", string(),
                     "direction", Map.of("type", "string", "enum", List.of("OUT", "IN", "BOTH")),
                     "depth", Map.of("type", "integer", "minimum", 1, "maximum", 4)),
                 List.of("repositoryId", "nodeId"), this::trace));
+    }
+
+    private Object searchNodes(Map<String, Object> args) {
+        String scope = scope(args);
+        String query = required(args, "query");
+        int limit = boundedLimit(args.get("limit"), 20);
+        String type = args.get("nodeType") == null ? "" : required(args, "nodeType").toUpperCase(Locale.ROOT);
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        if (type.isEmpty() || "PACKAGE".equals(type)) addNodes(nodes, "PACKAGE", packages.searchPackages(scope, query, limit));
+        if (type.isEmpty() || "UNIT".equals(type)) addNodes(nodes, "UNIT", units.searchUnits(scope, query, limit));
+        if (type.isEmpty() || "FUNCTION".equals(type)) addNodes(nodes, "FUNCTION", functions.searchFunctions(scope, query, limit));
+        if (type.isEmpty() || "ENDPOINT".equals(type)) addNodes(nodes, "ENDPOINT", endpoints.searchEndpoints(scope, query, limit));
+        return Map.of("graphScope", scope, "nodes", nodes.stream().limit(limit).toList());
+    }
+
+    private void addNodes(List<Map<String, Object>> target, String type, List<?> values) {
+        for (Object value : values) {
+            Map<String, Object> node = mapper.convertValue(value, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+            node.put("nodeType", type);
+            target.add(node);
+        }
+    }
+
+    private Object nodeSource(Map<String, Object> args) {
+        int repositoryId = exactInteger(args.get("repositoryId"), "repositoryId");
+        String scope = scope(args);
+        String nodeId = required(args, "nodeId");
+        int context = boundedContext(args.get("contextLines"), 10);
+        Map<String, Object> node = findNode(scope, nodeId);
+        if (node == null) throw new IllegalArgumentException("Graph node not found: " + nodeId);
+        String path = Objects.toString(node.get("projectFilePath"), "");
+        Integer start = integerValue(node.get("startLine"));
+        Integer end = integerValue(node.get("endLine"));
+        if (path.isBlank() || start == null || end == null) {
+            throw new IllegalArgumentException("Graph node has no source range: " + nodeId);
+        }
+        CodeSourceSnapshot source = sources.findCurrent(repositoryId, path)
+            .orElseThrow(() -> new IllegalArgumentException("Source snapshot not found for: " + path));
+        String[] lines = source.content().split("\\R", -1);
+        int from = Math.max(1, start - context);
+        int to = Math.min(lines.length, end + context);
+        StringBuilder snippet = new StringBuilder();
+        for (int line = from; line <= to; line++) {
+            snippet.append(String.format(Locale.ROOT, "%4d | %s%n", line, lines[line - 1]));
+        }
+        return Map.of("graphScope", scope, "nodeId", nodeId, "path", path,
+            "commitSha", source.commitSha(), "startLine", start, "endLine", end,
+            "fromLine", from, "toLine", to, "content", snippet.toString());
+    }
+
+    private Map<String, Object> findNode(String scope, String nodeId) {
+        for (Object value : List.of(
+                functions.searchFunctions(scope, nodeId, 20),
+                units.searchUnits(scope, nodeId, 20),
+                endpoints.searchEndpoints(scope, nodeId, 20))) {
+            for (Object candidate : (List<?>) value) {
+                Map<String, Object> node = mapper.convertValue(candidate, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+                if (nodeId.equals(node.get("id"))) return node;
+            }
+        }
+        return null;
     }
 
     private Object trace(Map<String, Object> args) {
@@ -100,6 +176,25 @@ public class GraphMcpTools {
         if (!(value instanceof Number number) || number.doubleValue() != number.intValue() || number.intValue() < 1)
             throw new IllegalArgumentException(key + " must be a positive integer");
         return number.intValue();
+    }
+
+    private static int boundedLimit(Object value, int defaultValue) {
+        if (value == null) return defaultValue;
+        int parsed = exactInteger(value, "limit");
+        return Math.min(parsed, 100);
+    }
+
+    private static int boundedContext(Object value, int defaultValue) {
+        if (value == null) return defaultValue;
+        if (!(value instanceof Number number) || number.doubleValue() != number.intValue()
+                || number.intValue() < 0) {
+            throw new IllegalArgumentException("contextLines must be an integer between 0 and 100");
+        }
+        return Math.min(number.intValue(), 100);
+    }
+
+    private static Integer integerValue(Object value) {
+        return value instanceof Number number ? number.intValue() : null;
     }
 
     private static String required(Map<String, Object> args, String key) {

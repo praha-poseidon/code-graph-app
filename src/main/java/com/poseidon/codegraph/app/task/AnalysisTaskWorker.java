@@ -2,11 +2,13 @@ package com.poseidon.codegraph.app.task;
 
 import com.poseidon.codegraph.app.config.RepositoryConfig;
 import com.poseidon.codegraph.app.config.RepositoryConfigStore;
+import com.poseidon.codegraph.app.source.CodeSourceSnapshotStore;
 import com.poseidon.codegraph.starter.service.IncrementalUpdateService;
 import com.poseidon.codegraph.starter.service.IncrementalUpdateSession;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
@@ -42,6 +44,7 @@ public final class AnalysisTaskWorker {
     private final IncrementalUpdateService incrementalUpdateService;
     private final AnalysisWorkerStore workerStore;
     private final AnalysisWorkerIdentity identity;
+    private final CodeSourceSnapshotStore sourceSnapshots;
     private final boolean autoBuild;
     private final Duration leaseDuration;
     private final Duration retryDelay;
@@ -49,6 +52,7 @@ public final class AnalysisTaskWorker {
     private final AtomicReference<String> lostLeaseTaskId = new AtomicReference<>();
     private volatile boolean ready;
 
+    @Autowired
     public AnalysisTaskWorker(
             AnalysisTaskStore taskStore,
             AnalysisTaskEventStore taskEventStore,
@@ -57,6 +61,7 @@ public final class AnalysisTaskWorker {
             IncrementalUpdateService incrementalUpdateService,
             AnalysisWorkerStore workerStore,
             AnalysisWorkerIdentity identity,
+            CodeSourceSnapshotStore sourceSnapshots,
             @Value("${code-graph.tasks.auto-build:true}") boolean autoBuild,
             @Value("${code-graph.tasks.lease-ms:30000}") long leaseMillis,
             @Value("${code-graph.tasks.retry-delay-ms:5000}") long retryDelayMillis) {
@@ -67,9 +72,26 @@ public final class AnalysisTaskWorker {
         this.incrementalUpdateService = incrementalUpdateService;
         this.workerStore = workerStore;
         this.identity = identity;
+        this.sourceSnapshots = sourceSnapshots;
         this.autoBuild = autoBuild;
         this.leaseDuration = Duration.ofMillis(Math.max(5000, leaseMillis));
         this.retryDelay = Duration.ofMillis(Math.max(0, retryDelayMillis));
+    }
+
+    /** Compatibility constructor for focused worker tests that do not enable source persistence. */
+    public AnalysisTaskWorker(
+            AnalysisTaskStore taskStore,
+            AnalysisTaskEventStore taskEventStore,
+            RepositoryConfigStore repositoryStore,
+            GitWorkspace workspace,
+            IncrementalUpdateService incrementalUpdateService,
+            AnalysisWorkerStore workerStore,
+            AnalysisWorkerIdentity identity,
+            boolean autoBuild,
+            long leaseMillis,
+            long retryDelayMillis) {
+        this(taskStore, taskEventStore, repositoryStore, workspace, incrementalUpdateService,
+            workerStore, identity, null, autoBuild, leaseMillis, retryDelayMillis);
     }
 
     @Scheduled(fixedDelayString = "${code-graph.tasks.poll-delay-ms:1000}")
@@ -156,6 +178,11 @@ public final class AnalysisTaskWorker {
                 throw exception;
             }
 
+            String commitSha = sourceSnapshots == null ? null : workspace.commitSha(checkout);
+            if (sourceSnapshots != null) {
+                sourceSnapshots.begin(task.id(), repository.id(), commitSha);
+            }
+
             List<String> classpath = prepareBuild(task.id(), checkout, repository);
             activeEventId = taskEventStore.start(task.id(), "DISCOVER", "正在扫描源码文件");
             List<Path> sourceFiles;
@@ -197,6 +224,10 @@ public final class AnalysisTaskWorker {
                         sourceRoots,
                         repository.endpointRuleSources(),
                         List.of());
+                    if (sourceSnapshots != null) {
+                        sourceSnapshots.saveFile(task.id(), repository.id(), commitSha,
+                            projectFilePath, language, file);
+                    }
                     current++;
                     String message = "正在解析 " + projectFilePath;
                     progress(task.id(), current, total, message);
@@ -225,6 +256,9 @@ public final class AnalysisTaskWorker {
                 taskEventStore.fail(activeEventId, "阶段未完成", failure == null ? null : stackSummary(failure));
             }
             closeSessions(task.id(), sessions);
+            if (!parsed && sourceSnapshots != null) {
+                sourceSnapshots.discard(task.id());
+            }
             cleanupWorkspace(task.id());
         }
 
@@ -259,6 +293,9 @@ public final class AnalysisTaskWorker {
         if (parsed && repository != null) {
             try {
                 checkpoint(task.id());
+                if (sourceSnapshots != null) {
+                    sourceSnapshots.promote(task.id(), repository.id());
+                }
                 if (!taskStore.succeed(task.id(), identity.workerId(), total)) {
                     throw new TaskLeaseLostException(task.id());
                 }

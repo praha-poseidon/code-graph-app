@@ -2,6 +2,7 @@ package com.poseidon.codegraph.app.mcp;
 
 import com.poseidon.codegraph.app.config.RepositoryConfigStore;
 import com.poseidon.codegraph.app.config.RepositoryRequest;
+import com.poseidon.codegraph.app.source.CodeSourceSnapshotStore;
 import com.poseidon.codegraph.engine.application.model.CodeFunctionDO;
 import com.poseidon.codegraph.engine.application.model.CodeRelationshipDO;
 import com.poseidon.codegraph.storage.memory.repository.InMemoryCodeGraphRepository;
@@ -9,11 +10,15 @@ import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport;
 import io.modelcontextprotocol.spec.McpSchema.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.*;
 import static org.assertj.core.api.Assertions.*;
@@ -25,15 +30,22 @@ class GraphMcpIntegrationTest {
     @LocalServerPort int port;
     @Autowired RepositoryConfigStore projects;
     @Autowired InMemoryCodeGraphRepository graph;
+    @Autowired CodeSourceSnapshotStore sourceSnapshots;
 
-    @Test void realClientInitializesDiscoversAndReadsOnlySelectedProject() {
+    @Test void realClientInitializesDiscoversAndReadsOnlySelectedProject(@TempDir Path temp) throws Exception {
         var project = projects.create(new RepositoryRequest("https://github.com/mcp-tests/demo.git", "main",
             List.of("java"), "NONE", null, null, null, List.of(), false));
         String scope = projects.identity(project.id()).graphScope();
         var function = new CodeFunctionDO();
         function.setId(scope + "::fn:save"); function.setName("save"); function.setProjectName(scope);
         function.setProjectFilePath("src/Service.java"); function.setLanguage("java");
+        function.setStartLine(2); function.setEndLine(3);
         graph.insertFunctionsBatch(List.of(function));
+        Path source = temp.resolve("Service.java");
+        Files.writeString(source, "package demo;\nclass Service {\n  void save() {}\n}\n", StandardCharsets.UTF_8);
+        sourceSnapshots.begin("mcp-source-task", project.id(), "mcp-commit");
+        sourceSnapshots.saveFile("mcp-source-task", project.id(), "mcp-commit", "src/Service.java", "java", source);
+        sourceSnapshots.promote("mcp-source-task", project.id());
         var edge = new CodeRelationshipDO();
         edge.setId("mcp-edge"); edge.setProjectName(scope); edge.setFromNodeId(function.getId());
         edge.setToNodeId(scope + "::fn:target"); edge.setRelationshipType("CALLS");
@@ -48,13 +60,22 @@ class GraphMcpIntegrationTest {
         try (var client = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(10)).build()) {
             assertThat(client.initialize().serverInfo().name()).isEqualTo("code-graph");
             assertThat(client.listTools().tools()).extracting(Tool::name)
-                .containsExactlyInAnyOrder("list_projects", "get_file_nodes", "trace_relationships");
+                .containsExactlyInAnyOrder("list_projects", "search_nodes", "get_file_nodes",
+                    "get_node_source", "trace_relationships");
             var listed = client.callTool(new CallToolRequest("list_projects", Map.of()));
             assertThat(text(listed)).contains(scope).doesNotContain("sshPrivateKey", "accessToken");
             var nodes = client.callTool(new CallToolRequest("get_file_nodes",
                 Map.of("repositoryId", project.id(), "path", "src/Service.java")));
             assertThat(nodes.isError()).isFalse();
             assertThat(text(nodes)).contains(function.getId(), "save");
+            var searched = client.callTool(new CallToolRequest("search_nodes",
+                Map.of("repositoryId", project.id(), "query", "save", "nodeType", "FUNCTION")));
+            assertThat(searched.isError()).isFalse();
+            assertThat(text(searched)).contains(function.getId(), "FUNCTION");
+            var sourceResult = client.callTool(new CallToolRequest("get_node_source",
+                Map.of("repositoryId", project.id(), "nodeId", function.getId(), "contextLines", 0)));
+            assertThat(sourceResult.isError()).as(text(sourceResult)).isFalse();
+            assertThat(text(sourceResult)).contains("void save() {}", "mcp-commit");
             var trace = client.callTool(new CallToolRequest("trace_relationships",
                 Map.of("repositoryId", project.id(), "nodeId", function.getId(), "depth", 2)));
             assertThat(text(trace)).contains("mcp-edge").doesNotContain("private-target", "mcp-foreign");

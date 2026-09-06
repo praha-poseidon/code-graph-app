@@ -73,6 +73,40 @@ CREATE TABLE IF NOT EXISTS analysis_task_event (
         FOREIGN KEY (task_id) REFERENCES analysis_task(id) ON DELETE CASCADE
 );
 
+CREATE TABLE IF NOT EXISTS code_source_snapshot (
+    id BIGSERIAL PRIMARY KEY,
+    repository_id BIGINT NOT NULL,
+    task_id VARCHAR(36) NOT NULL UNIQUE,
+    commit_sha VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'STAGING',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    promoted_at TIMESTAMP NULL,
+    CONSTRAINT fk_code_source_snapshot_repository
+        FOREIGN KEY (repository_id) REFERENCES repository_config(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS code_source_blob (
+    content_sha256 CHAR(64) PRIMARY KEY,
+    content_encoding VARCHAR(16) NOT NULL,
+    content_bytes BYTEA NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS code_source_file (
+    snapshot_id BIGINT NOT NULL,
+    path_hash CHAR(64) NOT NULL,
+    path VARCHAR(1024) NOT NULL,
+    language VARCHAR(32) NOT NULL,
+    content_sha256 CHAR(64) NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    PRIMARY KEY (snapshot_id, path_hash),
+    CONSTRAINT fk_code_source_file_snapshot
+        FOREIGN KEY (snapshot_id) REFERENCES code_source_snapshot(id) ON DELETE CASCADE,
+    CONSTRAINT fk_code_source_file_blob
+        FOREIGN KEY (content_sha256) REFERENCES code_source_blob(content_sha256)
+);
+
 CREATE INDEX IF NOT EXISTS idx_analysis_task_status_created
     ON analysis_task (status, created_at);
 CREATE INDEX IF NOT EXISTS idx_analysis_task_repository_created

@@ -50,6 +50,10 @@ public final class GitWorkspace {
         }
     }
 
+    public String commitSha(Path checkout) {
+        return run(List.of("git", "rev-parse", "HEAD"), checkout, Map.of(), Duration.ofSeconds(20)).trim();
+    }
+
     public void cleanup(String taskId) {
         Path taskRoot = workspaceRoot.resolve(taskId).normalize();
         if (!taskRoot.startsWith(workspaceRoot) || taskRoot.equals(workspaceRoot) || !Files.exists(taskRoot)) {
