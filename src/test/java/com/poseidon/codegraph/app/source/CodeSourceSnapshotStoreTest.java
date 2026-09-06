@@ -18,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @TestPropertySource(properties = {
     "code-graph.storage.type=memory",
     "code-graph.tasks.enabled=false",
+    "code-graph.source-snapshots.retained-superseded=0",
     "spring.datasource.url=jdbc:h2:mem:source-snapshot;MODE=MySQL;DB_CLOSE_DELAY=-1",
     "spring.sql.init.mode=always"
 })
@@ -61,6 +62,8 @@ class CodeSourceSnapshotStoreTest {
         assertThat(second.taskId()).isEqualTo("task-two");
         assertThat(second.commitSha()).isEqualTo("def456");
         assertThat(second.content()).contains("void load() {}").doesNotContain("void save() {}");
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM code_source_snapshot WHERE status = 'SUPERSEDED'", Long.class))
+            .isZero();
     }
 
     @Test

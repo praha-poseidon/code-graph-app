@@ -30,6 +30,8 @@ code-graph:
   storage:
     type: ${CODEGRAPH_STORAGE_TYPE:memory}
   workspace-root: ${CODEGRAPH_WORKSPACE_ROOT:${java.io.tmpdir}/codegraph-workspaces}
+  source-snapshots:
+    retained-superseded: ${CODEGRAPH_SOURCE_SNAPSHOT_RETAINED_SUPERSEDED:3}
   security:
     master-key: ${CODEGRAPH_MASTER_KEY:}
   tasks:

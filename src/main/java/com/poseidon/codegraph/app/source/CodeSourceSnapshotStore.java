@@ -1,6 +1,7 @@
 package com.poseidon.codegraph.app.source;
 
 import org.springframework.boot.sql.init.dependency.DependsOnDatabaseInitialization;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -23,9 +24,12 @@ import java.util.zip.GZIPOutputStream;
 public class CodeSourceSnapshotStore {
     private static final String GZIP = "gzip";
     private final JdbcTemplate jdbc;
+    private final int retainedSupersededSnapshots;
 
-    public CodeSourceSnapshotStore(JdbcTemplate jdbc) {
+    public CodeSourceSnapshotStore(JdbcTemplate jdbc,
+            @Value("${code-graph.source-snapshots.retained-superseded:3}") int retainedSupersededSnapshots) {
         this.jdbc = jdbc;
+        this.retainedSupersededSnapshots = Math.max(0, retainedSupersededSnapshots);
     }
 
     /** Start a new staging snapshot. Retries reuse the task id and replace its old staging rows. */
@@ -92,11 +96,30 @@ public class CodeSourceSnapshotStore {
         if (updated != 1) {
             throw new IllegalStateException("源码快照未找到或已被处理: taskId=" + taskId);
         }
+        pruneSuperseded(repositoryId);
     }
 
     @Transactional("repositoryTransactionManager")
     public void discard(String taskId) {
         jdbc.update("DELETE FROM code_source_snapshot WHERE task_id = ? AND status = 'STAGING'", taskId);
+    }
+
+    /** Keep a small rollback window while removing unbounded superseded snapshots and orphaned blobs. */
+    private void pruneSuperseded(long repositoryId) {
+        var ids = jdbc.queryForList("""
+            SELECT id FROM code_source_snapshot
+             WHERE repository_id = ? AND status = 'SUPERSEDED'
+             ORDER BY COALESCE(promoted_at, created_at) DESC
+            """, Long.class, repositoryId);
+        if (ids.size() <= retainedSupersededSnapshots) return;
+        for (Long id : ids.subList(retainedSupersededSnapshots, ids.size())) {
+            jdbc.update("DELETE FROM code_source_snapshot WHERE id = ? AND status = 'SUPERSEDED'", id);
+        }
+        jdbc.update("""
+            DELETE FROM code_source_blob
+             WHERE NOT EXISTS (SELECT 1 FROM code_source_file
+                                WHERE code_source_file.content_sha256 = code_source_blob.content_sha256)
+            """);
     }
 
     public Optional<CodeSourceSnapshot> findCurrent(long repositoryId, String path) {
