@@ -1,50 +1,77 @@
 name: codegraph
 
+x-codegraph-build: &codegraph-build
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      CODEGRAPH_ENGINE_REPOSITORY: ${CODEGRAPH_ENGINE_REPOSITORY:-https://github.com/praha-poseidon/code-graph-engine.git}
+      CODEGRAPH_ENGINE_REF: ${CODEGRAPH_ENGINE_REF:-master}
+      CODEGRAPH_TOOL_BUNDLE_URL: ${CODEGRAPH_TOOL_BUNDLE_URL:-}
+
+x-codegraph-environment: &codegraph-environment
+  CODEGRAPH_DATABASE_URL: jdbc:mysql://mysql:3306/codegraph?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
+  CODEGRAPH_DATABASE_USERNAME: codegraph
+  CODEGRAPH_DATABASE_PASSWORD: ${MYSQL_CODEGRAPH_PASSWORD:?set MYSQL_CODEGRAPH_PASSWORD in .env}
+  CODEGRAPH_DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
+  CODEGRAPH_STORAGE_TYPE: neo4j
+  SPRING_NEO4J_URI: bolt://neo4j:7687
+  SPRING_NEO4J_AUTHENTICATION_USERNAME: neo4j
+  SPRING_NEO4J_AUTHENTICATION_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
+  CODEGRAPH_QDRANT_URL: http://qdrant:6333
+  CODEGRAPH_MASTER_KEY: ${CODEGRAPH_MASTER_KEY:?set CODEGRAPH_MASTER_KEY in .env}
+  CODEGRAPH_AUTO_BUILD: ${CODEGRAPH_AUTO_BUILD:-true}
+  CODEGRAPH_PARSER_PROCESS_LANGUAGES: ${CODEGRAPH_PARSER_PROCESS_LANGUAGES:-}
+  CODEGRAPH_PARSER_JAVA_COMMAND: ${CODEGRAPH_PARSER_JAVA_COMMAND:-}
+  CODEGRAPH_PARSER_GO_COMMAND: ${CODEGRAPH_PARSER_GO_COMMAND:-}
+  CODEGRAPH_PARSER_GO_STREAMING: ${CODEGRAPH_PARSER_GO_STREAMING:-true}
+  CODEGRAPH_PARSER_JAVASCRIPT_COMMAND: ${CODEGRAPH_PARSER_JAVASCRIPT_COMMAND:-}
+  CODEGRAPH_PARSER_TYPESCRIPT_COMMAND: ${CODEGRAPH_PARSER_TYPESCRIPT_COMMAND:-}
+  CODEGRAPH_PARSER_PYTHON_COMMAND: ${CODEGRAPH_PARSER_PYTHON_COMMAND:-}
+  CODEGRAPH_PARSER_PHP_COMMAND: ${CODEGRAPH_PARSER_PHP_COMMAND:-}
+  CODEGRAPH_PARSER_KOTLIN_COMMAND: ${CODEGRAPH_PARSER_KOTLIN_COMMAND:-}
+  CODEGRAPH_PARSER_SWIFT_COMMAND: ${CODEGRAPH_PARSER_SWIFT_COMMAND:-}
+
+x-codegraph-dependencies: &codegraph-dependencies
+  depends_on:
+    mysql:
+      condition: service_healthy
+    neo4j:
+      condition: service_healthy
+    qdrant:
+      condition: service_healthy
+
+x-codegraph-service-base: &codegraph-service-base
+  <<: [*codegraph-build, *codegraph-dependencies]
+
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        CODEGRAPH_ENGINE_REPOSITORY: ${CODEGRAPH_ENGINE_REPOSITORY:-https://github.com/praha-poseidon/code-graph-engine.git}
-        CODEGRAPH_ENGINE_REF: ${CODEGRAPH_ENGINE_REF:-master}
-        CODEGRAPH_TOOL_BUNDLE_URL: ${CODEGRAPH_TOOL_BUNDLE_URL:-}
+    <<: *codegraph-service-base
     image: codegraph/workbench:${CODEGRAPH_VERSION:-local}
     restart: unless-stopped
     environment:
-      CODEGRAPH_DATABASE_URL: jdbc:mysql://mysql:3306/codegraph?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
-      CODEGRAPH_DATABASE_USERNAME: codegraph
-      CODEGRAPH_DATABASE_PASSWORD: ${MYSQL_CODEGRAPH_PASSWORD:?set MYSQL_CODEGRAPH_PASSWORD in .env}
-      CODEGRAPH_DATABASE_DRIVER: com.mysql.cj.jdbc.Driver
-      CODEGRAPH_STORAGE_TYPE: neo4j
-      SPRING_NEO4J_URI: bolt://neo4j:7687
-      SPRING_NEO4J_AUTHENTICATION_USERNAME: neo4j
-      SPRING_NEO4J_AUTHENTICATION_PASSWORD: ${NEO4J_PASSWORD:?set NEO4J_PASSWORD in .env}
-      CODEGRAPH_QDRANT_URL: http://qdrant:6333
-      CODEGRAPH_MASTER_KEY: ${CODEGRAPH_MASTER_KEY:?set CODEGRAPH_MASTER_KEY in .env}
-      CODEGRAPH_AUTO_BUILD: ${CODEGRAPH_AUTO_BUILD:-true}
-      CODEGRAPH_PARSER_PROCESS_LANGUAGES: ${CODEGRAPH_PARSER_PROCESS_LANGUAGES:-}
-      CODEGRAPH_PARSER_JAVA_COMMAND: ${CODEGRAPH_PARSER_JAVA_COMMAND:-}
-      CODEGRAPH_PARSER_GO_COMMAND: ${CODEGRAPH_PARSER_GO_COMMAND:-}
-      CODEGRAPH_PARSER_GO_STREAMING: ${CODEGRAPH_PARSER_GO_STREAMING:-true}
-      CODEGRAPH_PARSER_JAVASCRIPT_COMMAND: ${CODEGRAPH_PARSER_JAVASCRIPT_COMMAND:-}
-      CODEGRAPH_PARSER_TYPESCRIPT_COMMAND: ${CODEGRAPH_PARSER_TYPESCRIPT_COMMAND:-}
-      CODEGRAPH_PARSER_PYTHON_COMMAND: ${CODEGRAPH_PARSER_PYTHON_COMMAND:-}
-      CODEGRAPH_PARSER_PHP_COMMAND: ${CODEGRAPH_PARSER_PHP_COMMAND:-}
-      CODEGRAPH_PARSER_KOTLIN_COMMAND: ${CODEGRAPH_PARSER_KOTLIN_COMMAND:-}
-      CODEGRAPH_PARSER_SWIFT_COMMAND: ${CODEGRAPH_PARSER_SWIFT_COMMAND:-}
+      <<: *codegraph-environment
+      # API/UI 容器不抢任务；解析压力由下面的 worker 服务承担。
+      CODEGRAPH_TASKS_ENABLED: "false"
     ports:
       - "${CODEGRAPH_PORT:-8084}:8084"
     volumes:
       - codegraph_workspaces:/var/lib/codegraph/workspaces
       - ${CODEGRAPH_PARSER_HOME:-./parsers}:/opt/codegraph/parsers:ro
-    depends_on:
-      mysql:
-        condition: service_healthy
-      neo4j:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
+
+  worker:
+    <<: *codegraph-service-base
+    image: codegraph/workbench:${CODEGRAPH_VERSION:-local}
+    restart: unless-stopped
+    environment:
+      <<: *codegraph-environment
+      CODEGRAPH_TASKS_ENABLED: "true"
+      # 留空时由容器主机名、进程号和随机后缀生成唯一 Worker ID。
+      CODEGRAPH_WORKER_ID: ${CODEGRAPH_WORKER_ID:-}
+      CODEGRAPH_MCP_ENABLED: "false"
+    volumes:
+      - codegraph_workspaces:/var/lib/codegraph/workspaces
+      - ${CODEGRAPH_PARSER_HOME:-./parsers}:/opt/codegraph/parsers:ro
 
   mysql:
     image: mysql:8.4
