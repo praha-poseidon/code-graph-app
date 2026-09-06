@@ -1,0 +1,179 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  html, body, #root {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 antialiased;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-ink-200 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-300;
+  }
+}
+
+@layer components {
+  .prose-code pre {
+    @apply bg-ink-900 text-ink-100 rounded-lg p-4 text-sm overflow-x-auto;
+  }
+  .prose-code code {
+    @apply font-mono;
+  }
+}
+
+.settings-theme {
+  color: #f7f2ff;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(124, 58, 237, 0.12), transparent 34%),
+    #07080f;
+}
+
+.settings-theme .text-ink-900,
+.settings-theme .text-ink-800,
+.settings-theme .text-ink-700 {
+  color: #f1ecff !important;
+}
+
+.settings-theme .text-ink-600,
+.settings-theme .text-ink-500,
+.settings-theme .text-ink-400 {
+  color: #8f88a8 !important;
+}
+
+.settings-theme .bg-white {
+  background-color: rgba(17, 17, 29, 0.92) !important;
+}
+
+.settings-theme .bg-ink-50,
+.settings-theme .bg-ink-100 {
+  background-color: rgba(255, 255, 255, 0.055) !important;
+}
+
+.settings-theme .border-ink-100,
+.settings-theme .border-ink-200 {
+  border-color: rgba(255, 255, 255, 0.1) !important;
+}
+
+.settings-theme .divide-ink-100 > :not([hidden]) ~ :not([hidden]),
+.settings-theme .divide-ink-200 > :not([hidden]) ~ :not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.settings-theme .shadow-card,
+.settings-theme .shadow-2xl {
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.34) !important;
+}
+
+.settings-theme input,
+.settings-theme select,
+.settings-theme textarea {
+  background-color: #080912 !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: #e6dcff !important;
+}
+
+.settings-theme input::placeholder,
+.settings-theme textarea::placeholder {
+  color: #6f6984 !important;
+}
+
+.settings-theme input:focus,
+.settings-theme select:focus,
+.settings-theme textarea:focus {
+  border-color: rgba(139, 92, 246, 0.72) !important;
+}
+
+.settings-theme .bg-brand-600 {
+  background: linear-gradient(135deg, #8b5cf6, #5b21b6) !important;
+}
+
+.settings-theme .hover\:bg-brand-700:hover {
+  background: linear-gradient(135deg, #a78bfa, #6d28d9) !important;
+}
+
+.settings-theme .text-brand-600,
+.settings-theme .text-brand-700,
+.settings-theme .text-brand-800 {
+  color: #c4b5fd !important;
+}
+
+.settings-theme .bg-brand-50,
+.settings-theme .bg-brand-100,
+.settings-theme .bg-violet-50 {
+  background-color: rgba(124, 58, 237, 0.16) !important;
+}
+
+.settings-theme .border-brand-100 {
+  border-color: rgba(139, 92, 246, 0.28) !important;
+}
+
+.settings-theme .text-emerald-600,
+.settings-theme .text-emerald-700 {
+  color: #34d399 !important;
+}
+
+.settings-theme .bg-emerald-50 {
+  background-color: rgba(16, 185, 129, 0.13) !important;
+}
+
+.settings-theme .border-emerald-200 {
+  border-color: rgba(16, 185, 129, 0.24) !important;
+}
+
+.settings-theme .text-red-400,
+.settings-theme .text-red-500,
+.settings-theme .text-red-600 {
+  color: #fb7185 !important;
+}
+
+.settings-theme .bg-red-50 {
+  background-color: rgba(244, 63, 94, 0.12) !important;
+}
+
+.settings-theme .border-red-200 {
+  border-color: rgba(244, 63, 94, 0.26) !important;
+}
+
+.settings-theme .bg-amber-50,
+.settings-theme .bg-amber-100 {
+  background-color: rgba(245, 158, 11, 0.12) !important;
+}
+
+.settings-theme .border-amber-200 {
+  border-color: rgba(245, 158, 11, 0.26) !important;
+}
+
+.settings-theme .text-amber-600,
+.settings-theme .text-amber-700,
+.settings-theme .text-amber-800 {
+  color: #fbbf24 !important;
+}
+
+.settings-theme .hover\:bg-ink-50:hover,
+.settings-theme .hover\:bg-red-50:hover,
+.settings-theme .hover\:bg-emerald-50:hover {
+  background-color: rgba(255, 255, 255, 0.07) !important;
+}

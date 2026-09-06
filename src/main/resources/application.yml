@@ -1,0 +1,47 @@
+server:
+  port: 8084
+
+spring:
+  application:
+    name: code-graph-app
+  datasource:
+    url: ${CODEGRAPH_DATABASE_URL:jdbc:h2:file:./data/codegraph;MODE=MySQL;DATABASE_TO_LOWER=TRUE;AUTO_SERVER=TRUE}
+    username: ${CODEGRAPH_DATABASE_USERNAME:sa}
+    password: ${CODEGRAPH_DATABASE_PASSWORD:}
+    driver-class-name: ${CODEGRAPH_DATABASE_DRIVER:org.h2.Driver}
+  sql:
+    init:
+      mode: always
+      schema-locations: ${CODEGRAPH_DATABASE_SCHEMA:classpath:db/schema.sql}
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 10MB
+  task:
+    scheduling:
+      pool:
+        size: ${CODEGRAPH_SCHEDULER_POOL_SIZE:2}
+
+code-graph:
+  mcp:
+    enabled: ${CODEGRAPH_MCP_ENABLED:true}
+    public-url: ${CODEGRAPH_MCP_PUBLIC_URL:}
+    token: ${CODEGRAPH_MCP_TOKEN:}
+  storage:
+    type: ${CODEGRAPH_STORAGE_TYPE:memory}
+  workspace-root: ${CODEGRAPH_WORKSPACE_ROOT:${java.io.tmpdir}/codegraph-workspaces}
+  security:
+    master-key: ${CODEGRAPH_MASTER_KEY:}
+  tasks:
+    enabled: ${CODEGRAPH_TASKS_ENABLED:true}
+    poll-delay-ms: ${CODEGRAPH_TASK_POLL_DELAY_MS:1000}
+    heartbeat-ms: ${CODEGRAPH_TASK_HEARTBEAT_MS:5000}
+    lease-ms: ${CODEGRAPH_TASK_LEASE_MS:30000}
+    retry-delay-ms: ${CODEGRAPH_TASK_RETRY_DELAY_MS:5000}
+    max-attempts: ${CODEGRAPH_TASK_MAX_ATTEMPTS:3}
+    worker-id: ${CODEGRAPH_WORKER_ID:}
+    auto-build: ${CODEGRAPH_AUTO_BUILD:true}
+
+logging:
+  level:
+    com.poseidon.codegraph.engine.domain.service.processor: DEBUG

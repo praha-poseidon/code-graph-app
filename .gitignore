@@ -1,0 +1,7 @@
+target/
+data/
+frontend/node_modules/
+frontend/dist/
+.engine/
+.env
+.DS_Store
