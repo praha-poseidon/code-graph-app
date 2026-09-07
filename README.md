@@ -7,9 +7,12 @@
 首次构建会把 Engine 的公共模块安装到本机 Maven 仓库，然后构建 App：
 
 ```bash
+export CODEGRAPH_ENGINE_TOKEN=你的只读仓库令牌
 ./scripts/build.sh
 java -jar target/code-graph-app-0.0.1-SNAPSHOT.jar
 ```
+
+Engine 仓库是私有的，`CODEGRAPH_ENGINE_TOKEN` 只用于构建时读取 Engine；不要把它写进 URL、`.env`、Dockerfile 或提交记录。GitHub Actions 使用仓库 Secret `ENGINE_READ_TOKEN`，用户直接拉取已发布镜像时不需要这个令牌。
 
 也可以指定已有 Engine 工作区：
 
@@ -33,8 +36,12 @@ java -jar target/code-graph-app-0.0.1-SNAPSHOT.jar
 Compose 将 API/UI 与解析 Worker 分开：`app` 只提供接口和工作台，`worker` 负责领取数据库中的分析任务。任务通过 MySQL 租约分配，同一任务只会被一个 Worker 执行；多个 Worker 可以安全地并行处理不同任务。
 
 ```bash
-docker compose up -d --build --scale worker=3
+export CODEGRAPH_ENGINE_TOKEN=你的只读仓库令牌
+docker compose build --build-arg CODEGRAPH_ENGINE_REF=master app worker
+docker compose up -d --scale worker=3
 ```
+
+如果直接使用已发布的镜像，则不需要 `CODEGRAPH_ENGINE_TOKEN`；只有从公开 App 源码重新构建时才需要它。
 
 `worker=3` 表示启动 3 个 Worker 容器，不需要多台机器。每个容器自动生成独立的 Worker ID，共享 MySQL、Neo4j、Qdrant 和工作区卷。工作台的 Worker 页面会显示每个容器的在线状态、当前任务和心跳时间。
 

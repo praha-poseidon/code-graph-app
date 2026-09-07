@@ -8,6 +8,8 @@ x-codegraph-build: &codegraph-build
       CODEGRAPH_ENGINE_REPOSITORY: ${CODEGRAPH_ENGINE_REPOSITORY:-https://github.com/praha-poseidon/code-graph-engine.git}
       CODEGRAPH_ENGINE_REF: ${CODEGRAPH_ENGINE_REF:-master}
       CODEGRAPH_TOOL_BUNDLE_URL: ${CODEGRAPH_TOOL_BUNDLE_URL:-}
+    secrets:
+      - engine_token
 
 x-codegraph-environment: &codegraph-environment
   CODEGRAPH_DATABASE_URL: jdbc:mysql://mysql:3306/codegraph?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true
@@ -128,3 +130,7 @@ volumes:
   neo4j_data:
   qdrant_data:
   codegraph_workspaces:
+
+secrets:
+  engine_token:
+    environment: CODEGRAPH_ENGINE_TOKEN

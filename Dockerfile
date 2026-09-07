@@ -10,7 +10,12 @@ ARG CODEGRAPH_ENGINE_REPOSITORY=https://github.com/praha-poseidon/code-graph-eng
 ARG CODEGRAPH_ENGINE_REF=master
 WORKDIR /source
 COPY . ./code-graph-app/
-RUN git clone --branch "$CODEGRAPH_ENGINE_REF" --depth 1 "$CODEGRAPH_ENGINE_REPOSITORY" ./code-graph-engine
+RUN --mount=type=secret,id=engine_token,required=true \
+    set -eu; \
+    engine_token="$(cat /run/secrets/engine_token)"; \
+    test -n "$engine_token"; \
+    git -c "http.extraheader=AUTHORIZATION: bearer $engine_token" \
+      clone --branch "$CODEGRAPH_ENGINE_REF" --depth 1 "$CODEGRAPH_ENGINE_REPOSITORY" ./code-graph-engine
 COPY --from=frontend-build /source/code-graph-app/src/main/resources/static/ ./code-graph-app/src/main/resources/static/
 RUN mvn -B -f code-graph-engine/pom.xml -pl code-graph-spring-boot-starter -am -DskipTests install \
     && mvn -B -f code-graph-app/pom.xml -DskipTests package
@@ -40,7 +45,14 @@ COPY --from=application-build /source/code-graph-app/target/code-graph-app-0.0.1
 RUN useradd --system --uid 10001 --home-dir /var/lib/codegraph --create-home codegraph \
     && mkdir -p /opt/codegraph/parsers/bin /opt/codegraph/tool-bundle /var/lib/codegraph/workspaces \
     && if [ -n "$CODEGRAPH_TOOL_BUNDLE_URL" ]; then \
-         curl --fail --location --retry 3 "$CODEGRAPH_TOOL_BUNDLE_URL" -o /tmp/codegraph-tools.tar.gz \
+         if [ -f /run/secrets/engine_token ]; then \
+           curl --fail --location --retry 3 \
+             -H "Authorization: Bearer $(cat /run/secrets/engine_token)" \
+             -H "X-GitHub-Api-Version: 2022-11-28" \
+             "$CODEGRAPH_TOOL_BUNDLE_URL" -o /tmp/codegraph-tools.tar.gz; \
+         else \
+           curl --fail --location --retry 3 "$CODEGRAPH_TOOL_BUNDLE_URL" -o /tmp/codegraph-tools.tar.gz; \
+         fi \
          && tar -xzf /tmp/codegraph-tools.tar.gz --strip-components=1 -C /opt/codegraph/tool-bundle \
          && rm -f /tmp/codegraph-tools.tar.gz; \
        fi \
